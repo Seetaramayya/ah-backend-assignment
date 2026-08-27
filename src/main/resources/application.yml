@@ -1,5 +1,31 @@
 spring:
   application:
     name: backend-assignment
+  datasource:
+    url: jdbc:postgresql://localhost:5432/backend_assignment
+    username: backend_assignment
+    password: backend_assignment
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
 
 invoice-service.url: "http://localhost:8000"
+
+app:
+  cache:
+    invoice-id-ttl-seconds: 3600
+  security:
+    jwt:
+      # Overridden by APP_SECURITY_JWT_SECRET in .env / real environments. The fallback only exists so
+      # `./mvnw test` and a bare IDE run work without any setup; it is not a production secret. Keep it
+      # identical to SampleTokenGeneratorTest's defaultDummySecret so a no-env token verifies here.
+      secret: ${APP_SECURITY_JWT_SECRET:local-dev-secret-DO-NOT-USE-IN-PRODUCTION-please-override-me}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus

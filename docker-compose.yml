@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   mock-api:
     image: "wiremock/wiremock:3.5.2"
@@ -8,15 +6,32 @@ services:
     volumes:
       - ./wiremock/mappings:/home/wiremock/mappings
     entrypoint: ["/docker-entrypoint.sh", "--port=8000"]
-  #database:
-    #
+  database:
+    image: "postgres:16-alpine"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    ports:
+      # Used by manual-start.sh for running the app natively (./mvnw spring-boot:run) against this container.
+      # Override POSTGRES_PORT in .env if this collides with a Postgres you already have running locally.
+      - "${POSTGRES_PORT}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   application:
     build:
       context: .
       dockerfile: Dockerfile
     environment:
       - SPRING_PROFILES_ACTIVE=docker
+      - APP_SECURITY_JWT_SECRET=${APP_SECURITY_JWT_SECRET}
     ports:
       - "8080:8080"
     depends_on:
-      - mock-api
+      mock-api:
+        condition: service_started
+      database:
+        condition: service_healthy

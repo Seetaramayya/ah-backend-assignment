@@ -237,3 +237,9 @@ tags
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/vim,java,linux,macos,maven,kotlin,intellij+all,visualstudiocode
+
+# Local environment overrides (see .env.example)
+.env
+
+# Cached JWT for manual-scripts/ (written by generate-token.sh)
+manual-scripts/.token

@@ -1,1 +1,7 @@
 invoice-service.url: "http://mock-api:8000"
+
+spring:
+  datasource:
+    url: jdbc:postgresql://database:5432/backend_assignment
+    username: backend_assignment
+    password: backend_assignment
