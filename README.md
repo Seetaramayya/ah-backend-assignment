@@ -139,13 +139,15 @@ Completes a delivery. Only the `IN_PROGRESS -> DELIVERED` transition is supporte
    <td>POST /deliveries/invoice</td>
    <td>
 
-Queues a batch for invoicing via the third party (see [mock api](#mock-api)) and returns `202`. Batch size is capped
-(`app.invoice.max-delivery-ids`, default **100**; over the cap is `400`). Each response item has a `status`: a delivery
-that is already `SUCCEEDED` or still `PENDING` comes back with that item's current state and is **not** re-queued (so a
-retried POST is safe), an unknown id comes back `FAILED` with an `error`, and a delivery with no prior item — or whose
-last attempt `FAILED` — is (re)queued as `PENDING` with a `null` `invoiceId`. Queued items are sent in the background by
-a poller (`app.invoice.poll-interval-ms`) with retry + circuit breaker; poll `GET /deliveries/{deliveryId}/invoice` for
-the outcome.
+**Asynchronous — returns `202 Accepted`.** The third party is **not** called on this request: the batch is persisted
+and a background `@Scheduled` `InvoicePoller` sends each invoice with retry + circuit breaker. The `202` body lists a
+`status` per delivery — resolved now for anything already known, `PENDING` (with `invoiceId: null`) for what was
+queued. Clients then poll **`GET /deliveries/{deliveryId}/invoice`** for the final `SUCCEEDED` / `FAILED`.
+
+Details: batch size capped (`app.invoice.max-delivery-ids`, default **100**; over the cap is `400`). Per delivery: one
+already `SUCCEEDED` or still `PENDING` is returned as-is and **not** re-queued (a retried POST is safe); an unknown id
+returns `FAILED` + `error`; one with no prior item, or whose last attempt `FAILED`, is (re)queued as `PENDING`. Poll
+interval is `app.invoice.poll-interval-ms`.
 
    </td>
    <td>
