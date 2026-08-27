@@ -337,6 +337,24 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/deliveries/busines
 - No environment setup is required for tests or a local run: `app.security.jwt.secret` falls back to a dev value in
   `application.yml`, overridden by `APP_SECURITY_JWT_SECRET` (see `.env` / `manual-start.sh`) everywhere else.
 
+### Load test (Gatling)
+
+`src/test/kotlin/.../loadtest/DeliveryLoadSimulation.kt`. Each virtual user is a **driver** (one `vehicleId`) that
+creates `-Ddeliveries` deliveries, one every `-Dpace` seconds, each running the full flow: `POST /deliveries/v2` →
+`PATCH /deliveries/{id}` → `POST /deliveries/invoice` → `GET /deliveries/{id}/invoice`. `-Dusers` drivers are injected
+over `-Dramp` seconds. `GET /deliveries/business-summary` runs alongside as steady read traffic. Runs against a
+**running** app, so it is not part of `./mvnw test` or CI.
+
+```
+docker-compose up --build          # app on :8080
+./generate-token.sh                # writes manual-scripts/.token, read automatically by the sim
+./mvnw test-compile gatling:test -Dusers=2000 -Dramp=60 -Ddeliveries=5 -Dpace=12
+```
+
+Defaults: `users=20`, `ramp=60`, `deliveries=5`, `pace=12`, `base.url=http://localhost:8080`. Report:
+`target/gatling/deliveryloadsimulation-<timestamp>/index.html`; assertions are global p99 < 2 s and failure rate
+< 1 %. Kept reports and their analysis live in [`gatling-reports/`](./gatling-reports/README.md).
+
 ## To-do and considerations
 
 - **Rate limiting is not implemented**: nothing throttles callers. `POST /deliveries/invoice` especially needs a

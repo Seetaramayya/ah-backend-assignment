@@ -16,6 +16,8 @@
     <properties>
         <java.version>21</java.version>
         <kotlin.version>2.2.21</kotlin.version>
+        <gatling.version>3.11.5</gatling.version>
+        <gatling-maven-plugin.version>4.9.3</gatling-maven-plugin.version>
     </properties>
     <dependencies>
         <dependency>
@@ -113,6 +115,19 @@
             <groupId>org.wiremock</groupId>
             <artifactId>wiremock-standalone</artifactId>
             <version>3.9.1</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Gatling load test (src/test/scala, run via `mvn gatling:test`, not part of `mvn test`) -->
+        <dependency>
+            <groupId>io.gatling</groupId>
+            <artifactId>gatling-test-framework</artifactId>
+            <version>${gatling.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.gatling.highcharts</groupId>
+            <artifactId>gatling-charts-highcharts</artifactId>
+            <version>${gatling.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -283,6 +298,14 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+            <plugin>
+                <groupId>io.gatling</groupId>
+                <artifactId>gatling-maven-plugin</artifactId>
+                <version>${gatling-maven-plugin.version}</version>
+                <configuration>
+                    <simulationClass>com.ahold.technl.sandbox.loadtest.DeliveryLoadSimulation</simulationClass>
+                </configuration>
             </plugin>
         </plugins>
     </build>
