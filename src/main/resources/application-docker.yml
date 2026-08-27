@@ -5,3 +5,8 @@ spring:
     url: jdbc:postgresql://database:5432/backend_assignment
     username: backend_assignment
     password: backend_assignment
+
+app:
+  observability:
+    # The docker-compose Prometheus scrapes /actuator/prometheus over the compose network.
+    prometheus-scrape-open: true

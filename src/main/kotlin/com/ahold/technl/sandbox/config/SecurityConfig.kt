@@ -18,6 +18,9 @@ import javax.crypto.spec.SecretKeySpec
 @Configuration
 class SecurityConfig(
     @Value("\${app.security.jwt.secret}") private val jwtSecret: String,
+    // Opens /actuator/prometheus for the local docker-compose Prometheus scrape. Default false: in a
+    // real deployment actuator is served on a network-restricted management port, not exposed here.
+    @Value("\${app.observability.prometheus-scrape-open:false}") private val prometheusScrapeOpen: Boolean,
 ) {
     private fun secretKey(): SecretKeySpec = SecretKeySpec(jwtSecret.toByteArray(), "HmacSHA256")
 
@@ -29,6 +32,9 @@ class SecurityConfig(
             authorizeHttpRequests {
                 authorize("/actuator/health", permitAll)
                 authorize("/actuator/info", permitAll)
+                if (prometheusScrapeOpen) {
+                    authorize("/actuator/prometheus", permitAll)
+                }
                 authorize(anyRequest, authenticated)
             }
             oauth2ResourceServer {

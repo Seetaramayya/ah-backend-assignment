@@ -17,7 +17,7 @@ class SampleTokenGeneratorTest {
     fun `app's own encoder and decoder round-trip a generated token`() {
         val secret = System.getenv("APP_SECURITY_JWT_SECRET") ?: defaultDummySecret
 
-        val securityConfig = SecurityConfig(jwtSecret = secret)
+        val securityConfig = SecurityConfig(jwtSecret = secret, prometheusScrapeOpen = false)
         val now = Instant.now().truncatedTo(ChronoUnit.MINUTES)
         val oneDay = 60 * 60 * 24L
         val expiryDate = now.plusSeconds(oneDay * 30)

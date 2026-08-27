@@ -355,6 +355,16 @@ Defaults: `users=20`, `ramp=60`, `deliveries=5`, `pace=12`, `base.url=http://loc
 `target/gatling/deliveryloadsimulation-<timestamp>/index.html`; assertions are global p99 < 2 s and failure rate
 < 1 %. Kept reports and their analysis live in [`gatling-reports/`](./gatling-reports/README.md).
 
+### Observability (local)
+
+`docker-compose up` also starts **Prometheus** (`:9090`) and **Grafana** (`:3001`, anonymous admin). Prometheus
+scrapes the app's `/actuator/prometheus` every 5 s. That endpoint is only `permitAll` under the `docker` profile
+(`app.observability.prometheus-scrape-open`); everywhere else it stays authenticated like the rest of `/actuator/*`
+(only `health` and `info` are ever public). `micrometer-registry-prometheus` provides the metrics. Grafana auto-loads
+a **Backend Assignment** dashboard from `observability/grafana/`: HikariCP pool (active / idle / **pending** / acquire
+wait), per-endpoint p95/p99, request rate by status, JVM heap, GC pause — enough to watch a Gatling run and tell
+"raise the pool" from "the DB is the limit". To skip it: `docker-compose up application database mock-api`.
+
 ## To-do and considerations
 
 - **Rate limiting is not implemented**: nothing throttles callers. `POST /deliveries/invoice` especially needs a
@@ -379,6 +389,10 @@ Defaults: `users=20`, `ramp=60`, `deliveries=5`, `pace=12`, `base.url=http://loc
 - **CI/CD**: `.github/workflows/ci.yml` runs `./mvnw clean verify` (tests + coverage gate) on every push and PR. Still
   missing for delivery: build the image once, push it to a registry, tag it immutably (git SHA / semver), and have
   production deploy that instead of `docker-compose up --build` compiling on the host.
+- **Actuator in production**: `/actuator/health` and `/actuator/info` are public; `/actuator/prometheus` is opened
+  only under the `docker` profile for the local scrape, authenticated otherwise. In a real deployment actuator would
+  move to a dedicated `management.server.port` reachable only by the in-cluster metrics collector (NetworkPolicy),
+  not shared with the app's public port.
 - **Authentication**: JWT validation is wired up but against a project-local secret with no identity provider behind it
   (see [Authentication (local/dev)](#authentication-localdev)); production should integrate AH's internal auth platform.
 

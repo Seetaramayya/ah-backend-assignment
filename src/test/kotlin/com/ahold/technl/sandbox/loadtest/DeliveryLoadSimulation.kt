@@ -71,6 +71,9 @@ class DeliveryLoadSimulation : Simulation() {
                     .check(status().shouldBe(201))
                     .check(jsonPath("\$.id").saveAs("deliveryId")),
             )
+            // If the start failed, `deliveryId` is unset — end this iteration instead of trying (and
+            // failing to build) the PATCH/invoice/poll steps against a missing id.
+            .exitHereIfFailed()
             .exec(
                 http("PATCH /deliveries/{id}")
                     .patch("/deliveries/#{deliveryId}")

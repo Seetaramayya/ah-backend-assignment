@@ -27,7 +27,39 @@ on its 5 s interval throughout. Numbers are directional, not production SLOs.
 
 ---
 
-## `deliveryloadsimulation-20260827113519986` — 5000 drivers × 5 deliveries
+## 5000 drivers × 5 deliveries — HikariCP pool raised to 50
+
+`-Dusers=5000 -Dramp=60 -Ddeliveries=5 -Dpace=12`, ~120 s, after setting
+`spring.datasource.hikari.maximum-pool-size: 50` (was the default 10). Same load as the run below;
+report kept on disk only (`deliveryloadsimulation-20260827115449647`), not committed.
+
+| Request | count | p50 | p95 | p99 | max | mean | req/s |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| POST /deliveries/v2 | 25 000 | 1 | 6 | 49 | 272 | 3 | 208 |
+| PATCH /deliveries/{id} | 25 000 | 1 | 4 | 35 | 232 | 2 | 208 |
+| POST /deliveries/invoice | 25 000 | 1 | 4 | 29 | 241 | 2 | 208 |
+| GET /deliveries/{id}/invoice | 25 000 | 1 | 3 | 37 | 228 | 2 | 208 |
+| GET /deliveries/business-summary | 30 000 | 1 | 4 | 36 | 297 | 3 | 250 |
+| **All** | **130 000** | 1 | 4 | **38** | 297 | 2 | **1083** |
+
+**The pool was the bottleneck.** Same 1083 req/s and 0 failures, but with 5× the connections the
+tail collapsed:
+
+| | pool 10 | pool 50 |
+|---|---:|---:|
+| global p95 | 36 ms | **4 ms** |
+| global p99 | 165 ms | **38 ms** |
+| `POST /deliveries/v2` p95 | 57 ms | **6 ms** |
+| `POST /deliveries/v2` p99 | 207 ms | **49 ms** |
+| global max | 773 ms | **297 ms** |
+
+With pool 10, ~400 concurrent requests contended for 10 connections; at 50 the queue mostly
+disappears and latency is back near the 2000-driver numbers. Next bottleneck (if pushed harder)
+would be Postgres itself — connection count, locks, or the `business-summary` aggregate.
+
+---
+
+## `deliveryloadsimulation-20260827113519986` — 5000 drivers × 5 deliveries (pool 10, default)
 
 `-Dusers=5000 -Dramp=60 -Ddeliveries=5 -Dpace=12`, ~120 s. Both assertions **passed**.
 
@@ -51,8 +83,7 @@ on its 5 s interval throughout. Numbers are directional, not production SLOs.
   acquisition + the `findByVehicleIdAndStartedAt` pre-check + the unique-constraint insert. The
   reads (`GET .../invoice`, `business-summary`) hold up better.
 - `InvoicePoller` kept up: 0 failures on the `invoice` / poll steps.
-- **This is roughly the knee.** Next: raise `spring.datasource.hikari.maximum-pool-size` and
-  re-run — if the p95/p99 flatten, the pool was the bottleneck; if not, it's the DB itself.
+- **This is roughly the knee** — raising the HikariCP pool to 50 removes it (see the section above).
 
 ---
 

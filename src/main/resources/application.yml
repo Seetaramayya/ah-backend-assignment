@@ -5,6 +5,10 @@ spring:
     url: jdbc:postgresql://localhost:5432/backend_assignment
     username: backend_assignment
     password: backend_assignment
+    hikari:
+      # Default is 10; raised to reduce connection-wait latency under load. Keep well below the
+      # Postgres max_connections (default 100), remembering every app instance has its own pool.
+      maximum-pool-size: 25
   jpa:
     open-in-view: false
     hibernate:
@@ -53,3 +57,8 @@ management:
     web:
       exposure:
         include: health,info,prometheus
+  metrics:
+    distribution:
+      # Emit histogram buckets so Grafana can compute p95/p99 latency per endpoint.
+      percentiles-histogram:
+        http.server.requests: true
