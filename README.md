@@ -388,6 +388,10 @@ wait), per-endpoint p95/p99, request rate by status, JVM heap, GC pause — enou
   same instant can both queue it (a *retried* POST is already safe) — a partial unique index on
   `invoice_request_items (delivery_id) WHERE status IN ('PENDING','SUCCEEDED')` closes it; (e) `RestClientConfig` sets
   no connect/read timeouts, so a hung invoice service holds a poller thread until the socket gives up.
+- **Caching**: no cache layer currently, reads go straight to Postgres. If profiling shows it is needed, an in-process
+  Caffeine cache would help the `GET /deliveries/business-summary` aggregate and the per-batch "already invoiced"
+  lookup. Scaling out to multiple instances would call for a shared cache (Redis) instead, so entries and invalidation
+  stay consistent across nodes.
 - **CI/CD**: `.github/workflows/ci.yml` runs `./mvnw clean verify` (tests + coverage gate) on every push and PR. Still
   missing for delivery: build the image once, push it to a registry, tag it immutably (git SHA / semver), and have
   production deploy that instead of `docker-compose up --build` compiling on the host.
