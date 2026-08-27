@@ -1,0 +1,111 @@
+{
+  "uid": "backend-assignment",
+  "title": "Backend Assignment",
+  "tags": ["backend-assignment"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "annotations": { "list": [] },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "HikariCP connections",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "hikaricp_connections_active", "legendFormat": "active" },
+        { "refId": "B", "expr": "hikaricp_connections_idle", "legendFormat": "idle" },
+        { "refId": "C", "expr": "hikaricp_connections_pending", "legendFormat": "pending (waiting)" },
+        { "refId": "D", "expr": "hikaricp_connections_max", "legendFormat": "max" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "HikariCP connection acquire wait",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "hikaricp_connections_acquire_seconds_max", "legendFormat": "max wait" },
+        { "refId": "B", "expr": "rate(hikaricp_connections_acquire_seconds_sum[$__rate_interval]) / clamp_min(rate(hikaricp_connections_acquire_seconds_count[$__rate_interval]), 1)", "legendFormat": "mean wait" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "HTTP server latency p95 / p99 by endpoint",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 5, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{uri!~\"/actuator.*\"}[$__rate_interval])) by (le, uri))", "legendFormat": "p95 {{uri}}" },
+        { "refId": "B", "expr": "histogram_quantile(0.99, sum(rate(http_server_requests_seconds_bucket{uri!~\"/actuator.*\"}[$__rate_interval])) by (le, uri))", "legendFormat": "p99 {{uri}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "HTTP request rate by status",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 20, "stacking": { "mode": "normal" }, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{uri!~\"/actuator.*\"}[$__rate_interval])) by (status)", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "JVM heap",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "bytes", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "used" },
+        { "refId": "B", "expr": "sum(jvm_memory_committed_bytes{area=\"heap\"})", "legendFormat": "committed" },
+        { "refId": "C", "expr": "sum(jvm_memory_max_bytes{area=\"heap\"})", "legendFormat": "max" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "GC pause time per second",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never" } },
+        "overrides": []
+      },
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(jvm_gc_pause_seconds_sum[$__rate_interval])) by (action)", "legendFormat": "{{action}}" }
+      ]
+    }
+  ]
+}

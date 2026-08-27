@@ -1,5 +1,64 @@
 spring:
   application:
     name: backend-assignment
+  datasource:
+    url: jdbc:postgresql://localhost:5432/backend_assignment
+    username: backend_assignment
+    password: backend_assignment
+    hikari:
+      # Default is 10; raised to reduce connection-wait latency under load. Keep well below the
+      # Postgres max_connections (default 100), remembering every app instance has its own pool.
+      maximum-pool-size: 25
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
 
 invoice-service.url: "http://localhost:8000"
+
+app:
+  invoice:
+    max-delivery-ids: 100
+    # Background poller that sends queued (PENDING) invoices to the third party.
+    poll-interval-ms: 5000
+    poll-batch-size: 100
+  security:
+    jwt:
+      # Overridden by APP_SECURITY_JWT_SECRET in .env / real environments. The fallback only exists so
+      # `./mvnw test` and a bare IDE run work without any setup; it is not a production secret. Keep it
+      # identical to SampleTokenGeneratorTest's defaultDummySecret so a no-env token verifies here.
+      secret: ${APP_SECURITY_JWT_SECRET:local-dev-secret-DO-NOT-USE-IN-PRODUCTION-please-override-me}
+
+resilience4j:
+  retry:
+    instances:
+      invoiceService:
+        max-attempts: 5
+        wait-duration: 500ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - org.springframework.web.client.RestClientException
+        ignore-exceptions:
+          - org.springframework.web.client.HttpClientErrorException
+          - io.github.resilience4j.circuitbreaker.CallNotPermittedException
+  circuitbreaker:
+    instances:
+      invoiceService:
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  metrics:
+    distribution:
+      # Emit histogram buckets so Grafana can compute p95/p99 latency per endpoint.
+      percentiles-histogram:
+        http.server.requests: true

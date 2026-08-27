@@ -116,6 +116,7 @@ fabric.properties
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+*.hprof
 
 ### Kotlin ###
 # Compiled class file
@@ -237,3 +238,14 @@ tags
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/vim,java,linux,macos,maven,kotlin,intellij+all,visualstudiocode
+
+# Local environment overrides (see .env.example)
+.env
+
+# Cached JWT for manual-scripts/ (written by generate-token.sh)
+manual-scripts/.token
+
+# Gatling HTML reports are large; the analysis lives in gatling-reports/README.md.
+# One report (deliveryloadsimulation-20260827113519986) is kept committed as a reference.
+/gatling-reports/deliveryloadsimulation-*/
+!/gatling-reports/deliveryloadsimulation-20260827113519986/
