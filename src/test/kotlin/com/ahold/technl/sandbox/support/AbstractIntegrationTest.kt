@@ -1,6 +1,7 @@
 package com.ahold.technl.sandbox.support
 
 import com.ahold.technl.sandbox.delivery.DeliveryRepository
+import com.ahold.technl.sandbox.invoice.InvoiceRequestItemRepository
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration
 import org.junit.jupiter.api.BeforeEach
@@ -29,10 +30,14 @@ abstract class AbstractIntegrationTest {
     @Autowired
     lateinit var deliveryRepository: DeliveryRepository
 
-    // The deliveries table now has a UNIQUE (vehicle_id, started_at) constraint, so rows left by a
-    // prior test in this shared context would collide with fixed-payload inserts. Start each test clean.
+    @Autowired
+    lateinit var invoiceRequestItemRepository: InvoiceRequestItemRepository
+
+    // Shared ApplicationContext across test classes: rows left by a prior test would collide with the
+    // UNIQUE (vehicle_id, started_at) constraint and would be picked up by InvoicePoller.drainPending().
     @BeforeEach
-    fun clearDeliveries() {
+    fun clearData() {
+        invoiceRequestItemRepository.deleteAll()
         deliveryRepository.deleteAll()
     }
 
@@ -66,6 +71,11 @@ abstract class AbstractIntegrationTest {
             registry.add("spring.datasource.username", postgres::getUsername)
             registry.add("spring.datasource.password", postgres::getPassword)
             registry.add("invoice-service.url") { "http://localhost:${wireMockServer.port()}" }
+            // Keep the InvoicePoller idle in tests; they call drainPending() explicitly.
+            registry.add("app.invoice.poll-interval-ms") { "3600000" }
+            // Fast retries so a downstream-failure test doesn't wait out the production backoff.
+            registry.add("resilience4j.retry.instances.invoiceService.max-attempts") { "2" }
+            registry.add("resilience4j.retry.instances.invoiceService.wait-duration") { "10ms" }
         }
     }
 }

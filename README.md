@@ -139,7 +139,13 @@ Completes a delivery. Only the `IN_PROGRESS -> DELIVERED` transition is supporte
    <td>POST /deliveries/invoice</td>
    <td>
 
-Uses third party service (as defined in the [mock api](#mock-api)) to send invoices to customers.
+Queues a batch for invoicing via the third party (see [mock api](#mock-api)) and returns `202`. Batch size is capped
+(`app.invoice.max-delivery-ids`, default **100**; over the cap is `400`). Each response item has a `status`: a delivery
+that is already `SUCCEEDED` or still `PENDING` comes back with that item's current state and is **not** re-queued (so a
+retried POST is safe), an unknown id comes back `FAILED` with an `error`, and a delivery with no prior item — or whose
+last attempt `FAILED` — is (re)queued as `PENDING` with a `null` `invoiceId`. Queued items are sent in the background by
+a poller (`app.invoice.poll-interval-ms`) with retry + circuit breaker; poll `GET /deliveries/{deliveryId}/invoice` for
+the outcome.
 
    </td>
    <td>
@@ -159,9 +165,35 @@ Uses third party service (as defined in the [mock api](#mock-api)) to send invoi
    [
   {
     "deliveryId": "7167fc04-0625-49fc-98a9-8785a4a32b60",
-    "invoiceId": "e891827f-487f-4884-a8c3-77316212b81b"
+    "invoiceId": null,
+    "status": "PENDING",
+    "error": null
   }
 ]
+   ```
+
+   </td>
+</tr>
+
+<!-- GET /deliveries/{deliveryId}/invoice -->
+<tr>
+   <td>GET /deliveries/{deliveryId}/invoice</td>
+   <td>
+
+Latest invoicing outcome for a delivery (for polling a `PENDING` item from `POST /deliveries/invoice`). `404` if the
+delivery was never in an invoice batch.
+
+   </td>
+   <td colspan="1">&nbsp;</td>
+   <td>
+
+   ```json
+   {
+  "deliveryId": "7167fc04-0625-49fc-98a9-8785a4a32b60",
+  "invoiceId": "e891827f-487f-4884-a8c3-77316212b81b",
+  "status": "SUCCEEDED",
+  "error": null
+}
    ```
 
    </td>
@@ -296,6 +328,19 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/deliveries/busines
   re-timing a finished delivery, reverting to `IN_PROGRESS`). This assumes `(vehicleId, startedAt)` uniquely identifies
   a delivery. A more robust design is a client-supplied `Idempotency-Key` header backed by an `idempotency_keys` table
   that stores and replays the original response, which also covers retries where the client regenerates the payload.
+- **`POST /deliveries/invoice` async processing — remaining work**: the endpoint now returns `202` and a `@Scheduled`
+  `InvoicePoller` drains `PENDING` items with a resilience4j `@Retry` (exponential backoff) + `@CircuitBreaker` on the
+  outbound call. Still to do: (a) it is single-instance safe only — running more than one node needs the poller to
+  claim rows with `SELECT ... FOR UPDATE SKIP LOCKED` (or a lease column) so two nodes don't double-send; (b) a call
+  that fails after retries is marked `FAILED` and never re-attempted — an `attempts` column with a threshold would let
+  the poller retry transient failures across ticks before giving up; (c) backoff has no jitter.
+- **Invoice de-duplication still has a concurrency hole**: a retried `POST /deliveries/invoice` is now safe (a delivery
+  with a `PENDING`/`SUCCEEDED` item is not re-queued), but two POSTs for the same delivery landing at the same instant
+  can both read "no item yet" and both queue it. A partial unique index on
+  `invoice_request_items (delivery_id) WHERE status IN ('PENDING','SUCCEEDED')` (or an advisory lock per delivery)
+  would close it.
+- **No `RestClient` timeouts**: `RestClientConfig` sets only the base URL, so a hung invoice service ties up a poller
+  thread until the socket gives up. Connect/read timeouts belong on the builder (and pair naturally with the retry).
 - **Windows dev script**: `manual-start.sh` (native `./mvnw spring-boot:run` against dockerized dependencies,
   credentials from `.env`) is bash-only. An equivalent `manual-start.cmd`/`manual-start.ps1` for Windows hasn't been
   added yet.

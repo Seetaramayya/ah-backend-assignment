@@ -4,6 +4,7 @@ import com.ahold.technl.sandbox.delivery.DeliveryConflictException
 import com.ahold.technl.sandbox.delivery.DeliveryNotFoundException
 import com.ahold.technl.sandbox.delivery.IllegalDeliveryStateException
 import com.ahold.technl.sandbox.delivery.InvalidDeliveryTimeException
+import com.ahold.technl.sandbox.invoice.InvoiceRequestNotFoundException
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -33,6 +34,12 @@ class GlobalExceptionHandler {
         ResponseEntity
             .status(HttpStatus.CONFLICT)
             .body(ErrorResponse(code = "DELIVERY_CONFLICT", message = ex.message ?: "Conflicting delivery already exists"))
+
+    @ExceptionHandler(InvoiceRequestNotFoundException::class)
+    fun handleInvoiceRequestNotFound(ex: InvoiceRequestNotFoundException): ResponseEntity<ErrorResponse> =
+        ResponseEntity
+            .status(HttpStatus.NOT_FOUND)
+            .body(ErrorResponse(code = "INVOICE_REQUEST_NOT_FOUND", message = ex.message ?: "No invoice request found"))
 
     @ExceptionHandler(InvalidDeliveryTimeException::class)
     fun handleInvalidDeliveryTime(ex: InvalidDeliveryTimeException): ResponseEntity<ErrorResponse> =
