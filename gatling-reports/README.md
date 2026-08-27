@@ -9,7 +9,7 @@ Confluence, ...) rather than the repo; in-repo is good enough for this assignmen
 ```
 docker-compose up --build            # app :8080, mock invoice API :8000
 ./generate-token.sh                  # writes manual-scripts/.token
-./mvnw test-compile gatling:test -Dusers=2000 -Dramp=60 -Ddeliveries=5 -Dpace=12
+./mvnw test-compile gatling:test -Dusers=<N> -Dramp=60 -Ddeliveries=5 -Dpace=12
 mv target/gatling/deliveryloadsimulation-<ts> gatling-reports/
 ```
 
@@ -27,10 +27,38 @@ on its 5 s interval throughout. Numbers are directional, not production SLOs.
 
 ---
 
-## `deliveryloadsimulation-20260827110359818`
+## `deliveryloadsimulation-20260827113519986` — 5000 drivers × 5 deliveries
 
-**2000 drivers × 5 deliveries, 12 s apart** (`-Dusers=2000 -Dramp=60 -Ddeliveries=5 -Dpace=12`),
-~120 s run. Both assertions **passed**.
+`-Dusers=5000 -Dramp=60 -Ddeliveries=5 -Dpace=12`, ~120 s. Both assertions **passed**.
+
+| Request | count | p50 | p95 | p99 | max | mean | req/s |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| POST /deliveries/v2 | 25 000 | 1 | 57 | **207** | 639 | 11 | 208 |
+| PATCH /deliveries/{id} | 25 000 | 1 | 35 | 148 | 675 | 8 | 208 |
+| POST /deliveries/invoice | 25 000 | 1 | 30 | 127 | 773 | 7 | 208 |
+| GET /deliveries/{id}/invoice | 25 000 | 1 | 41 | 196 | 656 | 8 | 208 |
+| GET /deliveries/business-summary | 30 000 | 1 | 21 | 149 | 489 | 6 | 250 |
+| **All** | **130 000** | 1 | 36 | **165** | 773 | 8 | **1083** |
+
+- **130 000 requests, 0 failures**, everything still < 800 ms. Global p99 (165 ms) is 12× under
+  the 2 s budget — passes, but this is where load starts to show.
+- **~1083 req/s sustained** (2.5× the 2000-driver run), each lifecycle step at a flat 208 req/s.
+- **The tail inflated, the median did not.** vs the 2000-driver run: p50 stayed at 1 ms
+  everywhere, but global p99 went 7 ms → 165 ms and `POST /deliveries/v2` p95 went 3 ms → 57 ms.
+  So a *subset* of requests is now waiting on a shared resource — almost certainly the HikariCP
+  pool (10 connections) with ~5000 ÷ 12 ≈ 400 requests in flight.
+- **`POST /deliveries/v2` degrades first** (p95 57, p99 207) — the write path pays connection
+  acquisition + the `findByVehicleIdAndStartedAt` pre-check + the unique-constraint insert. The
+  reads (`GET .../invoice`, `business-summary`) hold up better.
+- `InvoicePoller` kept up: 0 failures on the `invoice` / poll steps.
+- **This is roughly the knee.** Next: raise `spring.datasource.hikari.maximum-pool-size` and
+  re-run — if the p95/p99 flatten, the pool was the bottleneck; if not, it's the DB itself.
+
+---
+
+## `deliveryloadsimulation-20260827110359818` — 2000 drivers × 5 deliveries
+
+`-Dusers=2000 -Dramp=60 -Ddeliveries=5 -Dpace=12`, ~120 s. Both assertions **passed**.
 
 | Request | count | p50 | p95 | p99 | max | mean | req/s |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -41,19 +69,8 @@ on its 5 s interval throughout. Numbers are directional, not production SLOs.
 | GET /deliveries/business-summary | 12 000 | 2 | 4 | 10 | 355 | 3 | 100 |
 | **All** | **52 000** | 1 | 3 | **7** | 434 | 2 | **433** |
 
-- **52 000 requests, 0 failures.** Global p99 = 7 ms — ~280× under the 2 s budget.
-- **~433 req/s sustained**, every lifecycle step at a flat 83 req/s (10 000 / 120 s) — no
-  throttling, responses/sec tracked requests/sec the whole run.
-- Latency is *lower* than the earlier 500-user single-shot baseline (which had `v2` p99 ≈ 50 ms).
-  The reason: `pace(12s)` means only ~2000 / 12 ≈ 170 drivers are mid-request at any instant, so
-  real concurrency is modest — which is the point of the driver model. A fleet doing one delivery
-  per vehicle every ~12 s is not 2000 simultaneous writes.
-- `max` sits at 337–434 ms across every request while p99 is 5–10 ms: those are lone outliers
-  (one request each), the usual JVM/connection tail, not systemic.
-- `business-summary` has the widest tail (p99 10 ms) — the date-windowed aggregate over
-  `deliveries`. Still trivial at this data volume; the one to re-measure once the table is large.
-- `InvoicePoller` kept up: no failures on the `invoice` / poll steps, so items were queued and
-  `GET /deliveries/{id}/invoice` returned `200` throughout.
-
-**Next step to find the ceiling:** drop `-Dpace` (or raise `-Dusers` / switch to a per-second
-arrival rate) until responses/sec stops tracking requests/sec or the p99 assertion fails.
+- 52 000 requests, 0 failures; global p99 = 7 ms — the app is coasting.
+- ~433 req/s sustained, every lifecycle step at 83 req/s.
+- `max` sits at 340–430 ms while p99 is 5–10 ms: isolated JVM/connection outliers, not systemic.
+- Real concurrency is only ~2000 ÷ 12 ≈ 170 in flight — the driver model paces work like a real
+  fleet, so this is not 2000 simultaneous writes.
