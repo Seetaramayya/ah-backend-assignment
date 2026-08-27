@@ -223,6 +223,35 @@ and `6 hours` (03:00 - 09:00) so the average is `4 hours` or `240 minutes`
 </tr>
 </table>
 
+## Architecture
+
+All `/deliveries*` calls carry a Bearer JWT. Delivery writes (`POST /deliveries`, `/deliveries/v2`, `PATCH
+/deliveries/{id}`) and `GET /deliveries/business-summary` are fully synchronous: controller → service → PostgreSQL.
+`POST /deliveries/invoice` is the exception: the service resolves already-handled deliveries, persists the rest as
+`PENDING` rows, and returns `202` **without** calling the third party. A `@Scheduled` `InvoicePoller` then drains the
+`PENDING` rows, calling the third-party invoice API through `InvoiceClient` (resilience4j `@Retry` with exponential
+backoff plus `@CircuitBreaker`) and marking each `SUCCEEDED` or `FAILED`. Clients poll
+`GET /deliveries/{deliveryId}/invoice` for the result.
+
+```mermaid
+flowchart TB
+    client([Client]) -->|Bearer JWT| ctl
+
+    subgraph sync["Synchronous (request thread)"]
+        ctl["Controllers<br/>Delivery, Invoice, BusinessSummary"] --> svc["Services"]
+    end
+
+    svc -->|"delivery writes + business-summary<br/>invoice: queue PENDING, return 202"| db[("PostgreSQL<br/>Flyway migrations")]
+
+    subgraph async["Asynchronous (@Scheduled)"]
+        poller["InvoicePoller<br/>every poll-interval-ms"] --> iclient["InvoiceClient<br/>@Retry (exp. backoff) + @CircuitBreaker"]
+    end
+
+    db -->|read PENDING items| poller
+    iclient -->|POST /v1/invoices| third["Third-party invoice API<br/>WireMock in dev and test"]
+    poller -->|write SUCCEEDED / FAILED| db
+```
+
 ## Mock API
 
 A mock API is exposed on port `8000` which is defined in the [docker-compose file](./docker-compose.yml#L4), this mock
@@ -310,47 +339,30 @@ curl -H "Authorization: Bearer <token>" http://localhost:8080/deliveries/busines
 
 ## To-do and considerations
 
-- **`POST /deliveries` conflates create and update**: the assignment's `POST /deliveries` lets a caller create a
-  delivery directly in the terminal `DELIVERED` state, and old clients also rely on calling it twice (once
-  `IN_PROGRESS`, then again `DELIVERED`) to finish a delivery. That combined behaviour is kept and made explicit
-  (**create-or-complete**), and the endpoint is deprecated (`@Deprecated` on the handler, `Deprecation`/`Link` response
-  headers, note in the endpoint table). The clean split is `POST /deliveries/v2` (start, `IN_PROGRESS` only) plus
-  `PATCH /deliveries/{id}` (complete, validating the `IN_PROGRESS -> DELIVERED` transition against stored state). Next
-  steps: give clients a deprecation window and a `Sunset` date, add read endpoints (`GET /deliveries/{id}`,
-  `GET /deliveries`) that the split workflow needs, and once traffic has migrated, remove `POST /deliveries` and rename
-  `/deliveries/v2` back to `/deliveries`.
-- **Idempotency is natural-key based, not request based**: a repeated `POST /deliveries` or `POST /deliveries/v2` is
-  de-duplicated by a `UNIQUE (vehicle_id, started_at)` constraint (`V2__deliveries_natural_key.sql`). On a hit each
-  endpoint reconciles by its own rules: `POST /deliveries/v2` (start) only checks the address, since a start request
-  carries no state — a retry returns `200` even if the stored delivery has since been completed; `POST /deliveries`
-  (create-or-complete) returns `200` unchanged for an identical repeat, applies the `IN_PROGRESS -> DELIVERED`
-  transition when the repeat carries it, and returns `409 DELIVERY_CONFLICT` for any other change (different address,
-  re-timing a finished delivery, reverting to `IN_PROGRESS`). This assumes `(vehicleId, startedAt)` uniquely identifies
-  a delivery. A more robust design is a client-supplied `Idempotency-Key` header backed by an `idempotency_keys` table
-  that stores and replays the original response, which also covers retries where the client regenerates the payload.
-- **`POST /deliveries/invoice` async processing — remaining work**: the endpoint now returns `202` and a `@Scheduled`
-  `InvoicePoller` drains `PENDING` items with a resilience4j `@Retry` (exponential backoff) + `@CircuitBreaker` on the
-  outbound call. Still to do: (a) it is single-instance safe only — running more than one node needs the poller to
-  claim rows with `SELECT ... FOR UPDATE SKIP LOCKED` (or a lease column) so two nodes don't double-send; (b) a call
-  that fails after retries is marked `FAILED` and never re-attempted — an `attempts` column with a threshold would let
-  the poller retry transient failures across ticks before giving up; (c) backoff has no jitter.
-- **Invoice de-duplication still has a concurrency hole**: a retried `POST /deliveries/invoice` is now safe (a delivery
-  with a `PENDING`/`SUCCEEDED` item is not re-queued), but two POSTs for the same delivery landing at the same instant
-  can both read "no item yet" and both queue it. A partial unique index on
-  `invoice_request_items (delivery_id) WHERE status IN ('PENDING','SUCCEEDED')` (or an advisory lock per delivery)
-  would close it.
-- **No `RestClient` timeouts**: `RestClientConfig` sets only the base URL, so a hung invoice service ties up a poller
-  thread until the socket gives up. Connect/read timeouts belong on the builder (and pair naturally with the retry).
-- **Windows dev script**: `manual-start.sh` (native `./mvnw spring-boot:run` against dockerized dependencies,
-  credentials from `.env`) is bash-only. An equivalent `manual-start.cmd`/`manual-start.ps1` for Windows hasn't been
-  added yet.
-- **CI/CD and image delivery**: `docker-compose up --build` compiles from source on demand, which is fine for local dev
-  and for reviewing this assignment, but is not how this should reach production. A real pipeline should build the image
-  once in CI, push it to a registry (e.g. ECR), tag it immutably (git SHA/semver), and have production deploy that
-  pre-built image rather than building on a production host.
-- **Authentication**: JWT validation is wired up (see [Authentication (local/dev)](#authentication-localdev)), but it
-  validates against a locally-configured secret with no real identity provider behind it. In production this should
-  integrate with AH's actual internal auth/identity platform instead of a project-local secret.
+- **Rate limiting is not implemented**: nothing throttles callers. `POST /deliveries/invoice` especially needs a
+  per-client limit because every accepted batch schedules downstream work. A token-bucket limiter (bucket4j or
+  resilience4j `@RateLimiter`) on the write endpoints, or enforcement at the ingress/gateway, should be added.
+- **`POST /deliveries` is a backward-compatibility endpoint**: it is deprecated and kept only for old clients
+  that create a delivery and later "create" it again as `DELIVERED` to finish it; `POST /deliveries/v2` (start) +
+  `PATCH /deliveries/{id}` (complete) are the clean split. Next: a deprecation window with a `Sunset` date,
+  `GET /deliveries/{id}` and `GET /deliveries` read endpoints for the split workflow, then drop `POST /deliveries` and
+  rename `/deliveries/v2` back.
+- **Request idempotency is natural-key based**: repeat `POST /deliveries` / `/v2` are de-duplicated by the
+  `UNIQUE (vehicle_id, started_at)` constraint, which does not cover a client that regenerates the payload (e.g. a
+  fresh `startedAt`) on retry. A client-supplied `Idempotency-Key` header backed by an `idempotency_keys` table that
+  stores and replays the original response is the robust design.
+- **Invoice flow — remaining work**: (a) the poller is single-instance safe only — multiple nodes need it to claim rows
+  with `SELECT ... FOR UPDATE SKIP LOCKED` (or a lease column); (b) an item that fails after its retries is marked
+  `FAILED` and never tried again — an `attempts` column with a threshold would let the poller re-try transient failures
+  across ticks; (c) backoff has no jitter; (d) two `POST /deliveries/invoice` calls for the same delivery at the exact
+  same instant can both queue it (a *retried* POST is already safe) — a partial unique index on
+  `invoice_request_items (delivery_id) WHERE status IN ('PENDING','SUCCEEDED')` closes it; (e) `RestClientConfig` sets
+  no connect/read timeouts, so a hung invoice service holds a poller thread until the socket gives up.
+- **CI/CD**: `.github/workflows/ci.yml` runs `./mvnw clean verify` (tests + coverage gate) on every push and PR. Still
+  missing for delivery: build the image once, push it to a registry, tag it immutably (git SHA / semver), and have
+  production deploy that instead of `docker-compose up --build` compiling on the host.
+- **Authentication**: JWT validation is wired up but against a project-local secret with no identity provider behind it
+  (see [Authentication (local/dev)](#authentication-localdev)); production should integrate AH's internal auth platform.
 
 ## Sending in the assignment
 
